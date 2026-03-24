@@ -1,0 +1,14 @@
+<template>
+    <lightning-card title="Hello World" icon-name="custom:custom14">
+        <div class="slds-p-horizontal_small">
+            <lightning-input
+                label="Enter your name"
+                value={name}
+                onchange={handleNameChange}>
+            </lightning-input>
+            <p class="slds-p-top_medium">
+                <strong>{greeting}</strong>
+            </p>
+        </div>
+    </lightning-card>
+</template>
