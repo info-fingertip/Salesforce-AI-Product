@@ -55,12 +55,7 @@
         <name>PermissionSet</name>
     </types>
 
-    <!-- AI Config Custom Metadata Type + Fields -->
-    <types>
-        <members>AI_Config__mdt</members>
-        <name>CustomObject</name>
-    </types>
-
+    
     <!-- AI Config Metadata Record -->
     <types>
         <members>AI_Config.OpenAI_Config</members>
