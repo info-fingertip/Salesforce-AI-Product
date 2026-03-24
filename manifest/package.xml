@@ -37,24 +37,34 @@
         <name>StaticResource</name>
     </types>
 
-    <!-- ── MISSING FROM YOUR MANIFEST ── -->
-
-    <!-- OpenAI Named Credential (secure API key storage) -->
+    <!-- Named Credential -->
     <types>
         <members>OpenAI_API</members>
         <name>NamedCredential</name>
     </types>
 
-    <!-- Remote Site Setting (allows callouts to api.openai.com) -->
+    <!-- Remote Site Setting -->
     <types>
         <members>OpenAI</members>
         <name>RemoteSiteSetting</name>
     </types>
 
-    <!-- Permission Set (grants users access to Apex controller) -->
+    <!-- Permission Set -->
     <types>
         <members>AI_Assistant_User</members>
         <name>PermissionSet</name>
+    </types>
+
+    <!-- AI Config Custom Metadata Type + Fields -->
+    <types>
+        <members>AI_Config__mdt</members>
+        <name>CustomObject</name>
+    </types>
+
+    <!-- AI Config Metadata Record -->
+    <types>
+        <members>AI_Config.OpenAI_Config</members>
+        <name>CustomMetadata</name>
     </types>
 
     <version>66.0</version>
