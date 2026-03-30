@@ -165,7 +165,8 @@ public with sharing class AIAgentOrchestrator {
     private static String getSchemaWithBudget() {
         if (cachedSchemaSummary != null) return cachedSchemaSummary;
 
-        String full = SchemaService.getCompactSchemaSummary();
+        // Read from pre-computed cache (1 SOQL, 0 CPU for schema)
+        String full = SchemaRefreshJob.getCachedSchema();
 
         // Truncate if too large
         if (full.length() > MAX_SCHEMA_CHARS) {

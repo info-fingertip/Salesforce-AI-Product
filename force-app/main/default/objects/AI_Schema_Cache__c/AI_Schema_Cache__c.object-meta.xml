@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<CustomObject xmlns="http://soap.sforce.com/2006/04/metadata">
+    <label>AI Schema Cache</label>
+    <pluralLabel>AI Schema Cache</pluralLabel>
+    <nameField>
+        <label>Cache Key</label>
+        <type>Text</type>
+    </nameField>
+    <deploymentStatus>Deployed</deploymentStatus>
+    <sharingModel>ReadWrite</sharingModel>
+    <description>Stores pre-computed org schema summaries for the AI Agent. Refreshed by SchemaRefreshJob (daily). Single record with Name = &quot;SCHEMA_SUMMARY&quot;.</description>
+</CustomObject>

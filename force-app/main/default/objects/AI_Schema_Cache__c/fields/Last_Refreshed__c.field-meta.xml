@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<CustomField xmlns="http://soap.sforce.com/2006/04/metadata">
+    <fullName>Last_Refreshed__c</fullName>
+    <label>Last Refreshed</label>
+    <type>DateTime</type>
+    <description>Timestamp of when the schema cache was last rebuilt.</description>
+</CustomField>
