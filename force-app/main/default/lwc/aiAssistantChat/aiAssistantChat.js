@@ -1,64 +1,82 @@
-import { LightningElement, track, wire } from 'lwc';
+import { LightningElement } from 'lwc';
 import { ShowToastEvent } from 'lightning/platformShowToastEvent';
-import askAI from '@salesforce/apex/AIAssistantController.askAI';
-import getAvailableObjects from '@salesforce/apex/AIAssistantController.getAvailableObjects';
+import handleQuestion from '@salesforce/apex/AIAgentOrchestrator.handleQuestion';
 
-const SUGGESTIONS = {
-    Opportunity : ['List all open opportunities with stage and amount','What is the total pipeline value by stage?','Which deals close this month?','Top 5 deals by value'],
-    Lead        : ['List all leads with name, company and status','Which leads have not been contacted?','Leads breakdown by source','Show lead conversion summary'],
-    Account     : ['List all accounts with industry and annual revenue','Top accounts by annual revenue','Accounts breakdown by industry','Show all account details'],
-    Case        : ['List all open cases with subject and priority','Cases by priority and status','Which cases have been open longest?','Case volume summary'],
-    Contact     : ['List all contacts with email and phone','Contacts missing email or phone','Show contacts by account','Recently created contacts']
-};
-const DEFAULT_SUGGESTIONS = ['List all records with full details','Show me a breakdown by category','What are the key trends?','Give me a complete summary'];
+const SUGGESTIONS = [
+    'What does my pipeline look like this month?',
+    'Show me top 10 accounts by annual revenue',
+    'Any high-priority cases open right now?',
+    'List leads that haven\'t been contacted yet',
+    'Compare opportunity win rates by stage',
+    'Show me contacts without email addresses'
+];
 
 export default class AiAssistantChat extends LightningElement {
-    @track messages       = [];
-    @track objectOptions  = [];
-    @track selectedObject  = '';
-    @track currentQuestion = '';
-    @track filterClause    = '';
-    @track isLoading       = false;
-    msgCounter = 0;
-
-    @wire(getAvailableObjects)
-    wiredObjects({ error, data }) {
-        if (data) {
-            this.objectOptions = data.map(o => ({ label: o.label + ' (' + o.apiName + ')', value: o.apiName }));
-        } else if (error) {
-            this.showToast('Error', this.extractError(error), 'error');
-        }
-    }
+    messages       = [];
+    currentQuestion = '';
+    isLoading       = false;
+    statusText      = '';
+    msgCounter      = 0;
 
     get isEmpty()         { return this.messages.length === 0 && !this.isLoading; }
-    get isSendDisabled()  { return this.isLoading || !this.selectedObject || !this.currentQuestion.trim(); }
-    get showSuggestions() { return !!this.selectedObject && this.messages.length === 0; }
-    get suggestions()     { return SUGGESTIONS[this.selectedObject] || DEFAULT_SUGGESTIONS; }
+    get isSendDisabled()  { return this.isLoading || !this.currentQuestion.trim(); }
+    get showSuggestions() { return this.messages.length === 0 && !this.isLoading; }
+    get suggestions()     { return SUGGESTIONS; }
 
-    handleObjectChange(e)    { this.selectedObject   = e.detail.value; }
-    handleFilterChange(e)    { this.filterClause     = e.target.value; }
-    handleQuestionChange(e)  { this.currentQuestion  = e.target.value; }
-    handleClear()            { this.messages = []; this.currentQuestion = ''; this.filterClause = ''; }
-    handleSuggestionClick(e) { this.currentQuestion  = e.target.dataset.question; this.handleAsk(); }
+    handleQuestionChange(e)  { this.currentQuestion = e.target.value; }
+    handleClear()            { this.messages = []; this.currentQuestion = ''; }
+    handleSuggestionClick(e) { this.currentQuestion = e.target.dataset.question; this.handleAsk(); }
     handleKeyDown(e)         { if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') { e.preventDefault(); if (!this.isSendDisabled) this.handleAsk(); } }
 
     async handleAsk() {
         const question = this.currentQuestion.trim();
-        if (!question || !this.selectedObject || this.isLoading) return;
+        if (!question || this.isLoading) return;
+
         this.pushUserMsg(question);
         this.currentQuestion = '';
         this.isLoading = true;
+        this.statusText = 'Analysing your question...';
         this.scrollBottom();
+
         try {
-            const result = await askAI({ objectApiName: this.selectedObject, userQuestion: question, filters: this.filterClause.trim() || null });
-            if (result.isSuccess) { this.pushAIMsg(result); }
-            else                  { this.pushErrorMsg(result.errorMessage || 'An error occurred.'); }
+            // Build conversation history for follow-up context
+            const conversationJson = this.buildConversationJson();
+
+            this.statusText = 'Querying your Salesforce data...';
+            const result = await handleQuestion({
+                userQuestion: question,
+                conversationJson: conversationJson
+            });
+
+            if (result.isSuccess) {
+                this.pushAIMsg(result);
+            } else {
+                this.pushErrorMsg(result.errorMessage || 'An error occurred.');
+            }
         } catch (err) {
             this.pushErrorMsg(this.extractError(err));
         } finally {
             this.isLoading = false;
+            this.statusText = '';
             this.scrollBottom();
         }
+    }
+
+    // ── Build conversation JSON for the orchestrator ──
+    buildConversationJson() {
+        const history = [];
+        for (const msg of this.messages) {
+            if (msg.isUser) {
+                history.push({ role: 'user', content: msg.text });
+            } else if (!msg.isError) {
+                // Trim AI responses to keep context manageable
+                const content = msg.rawText.length > 1500
+                    ? msg.rawText.substring(0, 1500) + '...'
+                    : msg.rawText;
+                history.push({ role: 'assistant', content });
+            }
+        }
+        return history.length > 0 ? JSON.stringify(history) : null;
     }
 
     pushUserMsg(text) {
@@ -78,35 +96,36 @@ export default class AiAssistantChat extends LightningElement {
     }
 
     pushAIMsg(result) {
-        const raw        = result.answer || '';
-        // remove the SHOW_CHART signal from displayed text
-        const showChart  = raw.includes('SHOW_CHART');
-        const cleanRaw   = raw.replace(/SHOW_CHART/g, '').trim();
-        const blocks     = this.parseBlocks(cleanRaw);
-        const chart      = showChart ? this.extractChart(blocks) : { bars: [], title: '' };
+        const raw = result.answer || '';
+        const blocks = this.parseBlocks(raw);
+        const chart = this.extractChart(blocks);
 
         this.messages = [...this.messages, {
             id          : ++this.msgCounter,
             isUser      : false,
             isError     : false,
-            text        : cleanRaw,
-            rawText     : cleanRaw,
-            objectName  : result.objectName,
-            recordCount : result.recordCount,
+            text        : raw,
+            rawText     : raw,
+            queriedObjects: result.queriedObjects,
+            totalRecords  : result.totalRecords,
+            modelUsed     : result.modelUsed,
             timestamp   : this.now(),
             wrapperClass: 'msg-row msg-row_ai',
             blocks,
             chartBars   : chart.bars,
             chartTitle  : chart.title,
-            hasChart    : showChart && chart.bars.length > 1
+            hasChart    : chart.bars.length > 1
         }];
     }
 
-    // ── Dynamic block parser — reads markdown line by line ──
+    // ── Markdown block parser ──
     parseBlocks(raw) {
         const lines  = raw.split('\n');
         const blocks = [];
         let tableLines = [];
+        let codeLines = [];
+        let inCode = false;
+        let codeLang = '';
         let blockId = 0;
 
         const flushTable = () => {
@@ -119,49 +138,73 @@ export default class AiAssistantChat extends LightningElement {
                 .map((l, i) => ({ id: i, cells: split(l).map((v, j) => ({ key: i+'_'+j, value: v })) }))
                 .filter(r => r.cells.length > 0);
             if (headers.length && rows.length) {
-                blocks.push({ id: ++blockId, type: 'table', isTable:true, headers, rows });
+                blocks.push({ id: ++blockId, type: 'table', isTable: true, headers, rows });
             }
             tableLines = [];
+        };
+
+        const flushCode = () => {
+            if (codeLines.length > 0) {
+                blocks.push({ id: ++blockId, type: 'code', isCode: true, text: codeLines.join('\n'), language: codeLang });
+            }
+            codeLines = [];
+            codeLang = '';
         };
 
         for (let i = 0; i < lines.length; i++) {
             const line = lines[i];
             const t    = line.trim();
 
-            // collect table lines
-            if (t.startsWith('|')) { tableLines.push(t); continue; }
+            // Code fence toggle
+            if (t.startsWith('```')) {
+                if (inCode) {
+                    flushCode();
+                    inCode = false;
+                } else {
+                    if (tableLines.length) flushTable();
+                    inCode = true;
+                    codeLang = t.replace(/^```/, '').trim();
+                }
+                continue;
+            }
 
-            // flush any pending table before processing next block
+            // Inside code block
+            if (inCode) { codeLines.push(line); continue; }
+
+            // Table lines
+            if (t.startsWith('|')) { tableLines.push(t); continue; }
             if (tableLines.length) flushTable();
 
-            if (!t) continue; // skip blanks
+            if (!t) continue;
 
-            // heading
+            // Headings
             if (t.startsWith('### ')) { blocks.push({ id:++blockId, type:'h3',  isH3:true,      text: this.md(t.replace(/^###\s*/,'')) }); continue; }
             if (t.startsWith('## '))  { blocks.push({ id:++blockId, type:'h2',  isH2:true,      text: this.md(t.replace(/^##\s*/,''))  }); continue; }
             if (t.startsWith('# '))   { blocks.push({ id:++blockId, type:'h1',  isH1:true,      text: this.md(t.replace(/^#\s*/,''))   }); continue; }
             if (t.startsWith('> '))   { blocks.push({ id:++blockId, type:'quote', isQuote:true, text: this.md(t.replace(/^>\s*/,''))   }); continue; }
             if (/^[-*•]\s/.test(t))   { blocks.push({ id:++blockId, type:'bullet', isBullet:true, text: this.md(t.replace(/^[-*•]\s*/,'')) }); continue; }
             if (/^\d+\.\s/.test(t))   { blocks.push({ id:++blockId, type:'numbered', isNumbered:true, text: this.md(t.replace(/^\d+\.\s*/,'')), num: (blocks.filter(b=>b.type==='numbered').length+1) }); continue; }
+            if (t === '---' || t === '***') { blocks.push({ id:++blockId, type:'hr', isHr:true }); continue; }
             blocks.push({ id:++blockId, type:'para', isPara:true, text: this.md(t) });
         }
+        if (inCode) flushCode();
         if (tableLines.length) flushTable();
         return blocks;
     }
 
-    // ── Strip markdown formatting to plain text, keep emojis ──
+    // ── Inline markdown formatting ──
     md(text) {
         return (text || '')
-            .replace(/\*\*\*(.+?)\*\*\*/g, '$1')   // bold+italic
-            .replace(/\*\*(.+?)\*\*/g,   '$1')       // bold
-            .replace(/\*(.+?)\*/g,         '$1')       // italic
-            .replace(/__(.+?)__/g,           '$1')       // alt bold
-            .replace(/_(.+?)_/g,             '$1')       // alt italic
-            .replace(/`(.+?)`/g,             '$1')       // inline code
-            .replace(/~~(.+?)~~/g,           '$1');      // strikethrough
+            .replace(/\*\*\*(.+?)\*\*\*/g, '$1')
+            .replace(/\*\*(.+?)\*\*/g,   '$1')
+            .replace(/\*(.+?)\*/g,         '$1')
+            .replace(/__(.+?)__/g,           '$1')
+            .replace(/_(.+?)_/g,             '$1')
+            .replace(/`(.+?)`/g,             '$1')
+            .replace(/~~(.+?)~~/g,           '$1');
     }
 
-    // ── Extract chart from first table that has numeric data ──
+    // ── Extract chart from first table with numeric data ──
     extractChart(blocks) {
         const tableBlock = blocks.find(b => b.type === 'table');
         if (!tableBlock || tableBlock.rows.length < 2) return { bars: [], title: '' };
@@ -196,7 +239,7 @@ export default class AiAssistantChat extends LightningElement {
         };
     }
 
-    // ── Download response as .txt ──
+    // ── Download response ──
     handleDownload(e) {
         const msgId = parseInt(e.currentTarget.dataset.msgid, 10);
         const msg   = this.messages.find(m => m.id === msgId);
@@ -205,14 +248,14 @@ export default class AiAssistantChat extends LightningElement {
         const url  = URL.createObjectURL(blob);
         const a    = document.createElement('a');
         a.href     = url;
-        a.download = (msg.objectName || 'AI') + '_response_' + this.now().replace(':','') + '.txt';
+        a.download = (msg.queriedObjects || 'AI') + '_response_' + this.now().replace(':','') + '.txt';
         a.click();
         URL.revokeObjectURL(url);
     }
 
     scrollBottom() {
         // eslint-disable-next-line @lwc/lwc/no-async-operation
-        setTimeout(() => { const w = this.template.querySelector('.chat-window'); if (w) w.scrollTop = w.scrollHeight; }, 120);
+        setTimeout(() => { const w = this.template.querySelector('.chat-win'); if (w) w.scrollTop = w.scrollHeight; }, 120);
     }
     now() { return new Date().toLocaleTimeString([], { hour:'2-digit', minute:'2-digit' }); }
     extractError(e) {

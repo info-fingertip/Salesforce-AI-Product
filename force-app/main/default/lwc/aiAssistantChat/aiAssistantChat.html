@@ -5,30 +5,15 @@
         <div class="slds-var-p-horizontal_medium slds-var-p-top_small">
             <div class="header-bar slds-grid slds-grid_align-spread slds-grid_vertical-align-center">
                 <div class="slds-col">
-                    <span class="hpill">✦ GPT-4o-mini</span>
+                    <span class="hpill">✦ AI Agent</span>
                     <span class="hpill ml">⚡ Live Data</span>
+                    <span class="hpill ml">🔍 Auto-Query</span>
                 </div>
-                <lightning-button-icon icon-name="utility:refresh" variant="border-filled" title="Clear" onclick={handleClear} size="small"></lightning-button-icon>
+                <lightning-button-icon icon-name="utility:refresh" variant="border-filled" title="Clear conversation" onclick={handleClear} size="small"></lightning-button-icon>
             </div>
         </div>
 
-        <!-- Selectors -->
-        <div class="slds-var-p-horizontal_medium slds-var-p-top_small">
-            <div class="slds-grid slds-gutters_x-small slds-grid_vertical-align-end">
-                <div class="slds-col slds-size_1-of-2">
-                    <lightning-combobox label="Salesforce Object" placeholder="Select an object..."
-                        options={objectOptions} value={selectedObject} onchange={handleObjectChange} disabled={isLoading}>
-                    </lightning-combobox>
-                </div>
-                <div class="slds-col slds-size_1-of-2">
-                    <lightning-input type="text" label="Filter (optional)" placeholder="e.g. StageName = 'Closed Won'"
-                        value={filterClause} onchange={handleFilterChange} disabled={isLoading}>
-                    </lightning-input>
-                </div>
-            </div>
-        </div>
-
-        <!-- Suggestions -->
+        <!-- Suggestions (shown when no messages) -->
         <template if:true={showSuggestions}>
             <div class="slds-var-p-horizontal_medium slds-var-p-top_small">
                 <div class="sugg-row">
@@ -46,8 +31,8 @@
                 <template if:true={isEmpty}>
                     <div class="empty-st">
                         <div class="empty-ico">✦</div>
-                        <p class="empty-ttl">Salesforce AI Assistant</p>
-                        <p class="empty-sub">Select an object and ask anything about your data</p>
+                        <p class="empty-ttl">Salesforce AI Agent</p>
+                        <p class="empty-sub">Ask anything about your Salesforce data — I'll figure out what to query</p>
                     </div>
                 </template>
 
@@ -70,10 +55,10 @@
                                 <div class="ai-topbar">
                                     <div class="ai-left">
                                         <span class="ai-ava">✦</span>
-                                        <span class="ai-lbl">AI Assistant</span>
-                                        <template if:true={msg.objectName}>
-                                            <span class="ai-tag">{msg.objectName}</span>
-                                            <span class="ai-tag">{msg.recordCount} records</span>
+                                        <span class="ai-lbl">AI Agent</span>
+                                        <template if:true={msg.queriedObjects}>
+                                            <span class="ai-tag">{msg.queriedObjects}</span>
+                                            <span class="ai-tag">{msg.totalRecords} records</span>
                                         </template>
                                     </div>
                                     <template if:false={msg.isError}>
@@ -95,10 +80,11 @@
 
                                             <h2 key={blk.id} if:true={blk.isH1} class="blk-h1">{blk.text}</h2>
                                             <h3 key={blk.id} if:true={blk.isH2} class="blk-h2">{blk.text}</h3>
-                                            <div key={blk.id} if:true={blk.isCode} class="blk-code"><pre>{blk.text}</pre></div>
                                             <h4 key={blk.id} if:true={blk.isH3} class="blk-h3">{blk.text}</h4>
+                                            <div key={blk.id} if:true={blk.isCode} class="blk-code"><pre>{blk.text}</pre></div>
                                             <div key={blk.id} if:true={blk.isQuote} class="blk-quote">{blk.text}</div>
                                             <p key={blk.id} if:true={blk.isPara} class="blk-para">{blk.text}</p>
+                                            <hr key={blk.id} if:true={blk.isHr} class="blk-hr"/>
                                             <div key={blk.id} if:true={blk.isBullet} class="blk-bullet">
                                                 <span class="bull-dot">•</span>
                                                 <span class="bull-txt">{blk.text}</span>
@@ -108,7 +94,7 @@
                                                 <span class="bull-txt">{blk.text}</span>
                                             </div>
 
-                                            <!-- Inline table wherever AI puts it -->
+                                            <!-- Inline table -->
                                             <template if:true={blk.isTable}>
                                                 <div key={blk.id} class="tbl-wrap">
                                                     <div class="tbl-scroll">
@@ -137,7 +123,7 @@
                                         </template>
                                     </div>
 
-                                    <!-- Auto chart from first numeric table -->
+                                    <!-- Auto chart -->
                                     <template if:true={msg.hasChart}>
                                         <div class="chart-wrap">
                                             <div class="chart-ttl">📈 {msg.chartTitle}</div>
@@ -168,7 +154,7 @@
                         <div class="bubble-ai typing-bbl">
                             <div class="ai-topbar">
                                 <span class="ai-ava">✦</span>
-                                <span class="ai-lbl">Analysing your Salesforce data...</span>
+                                <span class="ai-lbl">{statusText}</span>
                             </div>
                             <div class="dots"><span></span><span></span><span></span></div>
                         </div>
@@ -182,7 +168,7 @@
         <div class="slds-var-p-around_medium">
             <div class="inp-row">
                 <div class="inp-inner">
-                    <lightning-textarea label="" placeholder="Ask anything — e.g. List all accounts with revenue, Show open deals by stage..."
+                    <lightning-textarea label="" placeholder="Ask anything about your Salesforce data — e.g. Show me top deals, List overdue cases, Accounts by industry..."
                         value={currentQuestion} onchange={handleQuestionChange} onkeydown={handleKeyDown}
                         max-length="1000" disabled={isLoading}>
                     </lightning-textarea>
@@ -191,7 +177,7 @@
                     onclick={handleAsk} disabled={isSendDisabled}>
                 </lightning-button>
             </div>
-            <p class="inp-hint">Ctrl+Enter to send · Tables, charts and insights render automatically</p>
+            <p class="inp-hint">Ctrl+Enter to send · AI auto-detects objects, fields, and relationships · Follow-up questions supported</p>
         </div>
 
     </lightning-card>
