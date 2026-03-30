@@ -195,8 +195,8 @@ public with sharing class AIAgentOrchestrator {
             System.debug(LoggingLevel.WARN, 'Failed to parse conversation: ' + e.getMessage());
         }
 
-        // Limit conversation context to last 6 messages (~3 turns)
-        while (history.size() > 6) {
+        // Limit conversation context to last 4 messages (2 turns) to save tokens + time
+        while (history.size() > 4) {
             history.remove(0);
         }
         return history;
@@ -414,16 +414,16 @@ public with sharing class AIAgentOrchestrator {
     // ── Governor limit checks ───────────────────────────────────────────────
 
     private static void checkGovernorLimits() {
-        // SOQL queries: need at least 10 remaining
-        if (Limits.getQueries() > Limits.getLimitQueries() - 10) {
+        // SOQL queries: need at least 5 remaining
+        if (Limits.getQueries() > Limits.getLimitQueries() - 5) {
             throw new AgentException('Approaching SOQL query governor limit. Please try a simpler question.');
         }
-        // Callouts: need at least 2 remaining (planner + analyst)
+        // Callouts: need at least 2 remaining
         if (Limits.getCallouts() > Limits.getLimitCallouts() - 2) {
             throw new AgentException('Approaching callout governor limit. Please try again in a new transaction.');
         }
-        // CPU time: warn if over 80%
-        if (Limits.getCpuTime() > Limits.getLimitCpuTime() * 0.8) {
+        // CPU time: only block if over 90% (schema is now lightweight)
+        if (Limits.getCpuTime() > Limits.getLimitCpuTime() * 0.9) {
             throw new AgentException('Approaching CPU time limit. Please try a simpler question.');
         }
     }

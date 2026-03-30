@@ -70,12 +70,15 @@ export default class AiAssistantChat extends LightningElement {
 
     buildConversationJson() {
         const history = [];
-        for (const msg of this.messages) {
+        // Only include last 4 messages (2 turns) to keep payload small
+        const recent = this.messages.slice(-4);
+        for (const msg of recent) {
             if (msg.isUser) {
                 history.push({ role: 'user', content: msg.text });
             } else if (!msg.isError) {
-                const content = msg.rawText.length > 1500
-                    ? msg.rawText.substring(0, 1500) + '...'
+                // Trim AI responses aggressively — only first 500 chars for context
+                const content = msg.rawText.length > 500
+                    ? msg.rawText.substring(0, 500) + '...'
                     : msg.rawText;
                 history.push({ role: 'assistant', content });
             }
