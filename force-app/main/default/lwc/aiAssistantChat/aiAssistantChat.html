@@ -13,7 +13,7 @@
             </div>
         </div>
 
-        <!-- Suggestions (shown when no messages) -->
+        <!-- Suggestions -->
         <template if:true={showSuggestions}>
             <div class="slds-var-p-horizontal_medium slds-var-p-top_small">
                 <div class="sugg-row">
@@ -24,10 +24,11 @@
             </div>
         </template>
 
-        <!-- Chat -->
+        <!-- Chat window -->
         <div class="slds-var-p-horizontal_medium slds-var-p-top_small">
             <div class="chat-win">
 
+                <!-- Empty state -->
                 <template if:true={isEmpty}>
                     <div class="empty-st">
                         <div class="empty-ico">✦</div>
@@ -36,10 +37,11 @@
                     </div>
                 </template>
 
+                <!-- Messages -->
                 <template for:each={messages} for:item="msg">
                     <div key={msg.id} class={msg.wrapperClass}>
 
-                        <!-- User -->
+                        <!-- User message -->
                         <template if:true={msg.isUser}>
                             <div class="bubble-user">
                                 <p class="user-txt">{msg.text}</p>
@@ -47,11 +49,11 @@
                             </div>
                         </template>
 
-                        <!-- AI -->
+                        <!-- AI message -->
                         <template if:false={msg.isUser}>
                             <div class="bubble-ai">
 
-                                <!-- AI top bar -->
+                                <!-- Top bar -->
                                 <div class="ai-topbar">
                                     <div class="ai-left">
                                         <span class="ai-ava">✦</span>
@@ -73,57 +75,11 @@
                                     <div class="err-blk">⚠️ {msg.text}</div>
                                 </template>
 
-                                <!-- Dynamic blocks -->
+                                <!-- AI response — rendered HTML via lwc:dom="manual" -->
                                 <template if:false={msg.isError}>
-                                    <div class="blocks">
-                                        <template for:each={msg.blocks} for:item="blk">
+                                    <div class="ai-content" lwc:dom="manual" data-content-id={msg.id}></div>
 
-                                            <h2 key={blk.id} if:true={blk.isH1} class="blk-h1">{blk.text}</h2>
-                                            <h3 key={blk.id} if:true={blk.isH2} class="blk-h2">{blk.text}</h3>
-                                            <h4 key={blk.id} if:true={blk.isH3} class="blk-h3">{blk.text}</h4>
-                                            <div key={blk.id} if:true={blk.isCode} class="blk-code"><pre>{blk.text}</pre></div>
-                                            <div key={blk.id} if:true={blk.isQuote} class="blk-quote">{blk.text}</div>
-                                            <p key={blk.id} if:true={blk.isPara} class="blk-para">{blk.text}</p>
-                                            <hr key={blk.id} if:true={blk.isHr} class="blk-hr"/>
-                                            <div key={blk.id} if:true={blk.isBullet} class="blk-bullet">
-                                                <span class="bull-dot">•</span>
-                                                <span class="bull-txt">{blk.text}</span>
-                                            </div>
-                                            <div key={blk.id} if:true={blk.isNumbered} class="blk-bullet">
-                                                <span class="bull-dot num-dot">{blk.num}</span>
-                                                <span class="bull-txt">{blk.text}</span>
-                                            </div>
-
-                                            <!-- Inline table -->
-                                            <template if:true={blk.isTable}>
-                                                <div key={blk.id} class="tbl-wrap">
-                                                    <div class="tbl-scroll">
-                                                        <table class="dtbl">
-                                                            <thead>
-                                                                <tr>
-                                                                    <template for:each={blk.headers} for:item="h">
-                                                                        <th key={h}>{h}</th>
-                                                                    </template>
-                                                                </tr>
-                                                            </thead>
-                                                            <tbody>
-                                                                <template for:each={blk.rows} for:item="row">
-                                                                    <tr key={row.id}>
-                                                                        <template for:each={row.cells} for:item="cell">
-                                                                            <td key={cell.key}>{cell.value}</td>
-                                                                        </template>
-                                                                    </tr>
-                                                                </template>
-                                                            </tbody>
-                                                        </table>
-                                                    </div>
-                                                </div>
-                                            </template>
-
-                                        </template>
-                                    </div>
-
-                                    <!-- Auto chart -->
+                                    <!-- Auto chart (still LWC-rendered for reactivity) -->
                                     <template if:true={msg.hasChart}>
                                         <div class="chart-wrap">
                                             <div class="chart-ttl">📈 {msg.chartTitle}</div>
@@ -138,7 +94,6 @@
                                             </template>
                                         </div>
                                     </template>
-
                                 </template>
 
                                 <p class="ts">{msg.timestamp}</p>
