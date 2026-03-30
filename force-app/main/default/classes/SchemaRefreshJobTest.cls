@@ -73,8 +73,8 @@ private class SchemaRefreshJobTest {
     }
 
     @isTest
-    static void testGetCachedSchema_BuildsOnFirstCall() {
-        // No cache exists — should auto-build
+    static void testGetCachedSchema_ComputesLiveWhenNoCache() {
+        // No cache exists — should compute live without DML
         Test.startTest();
         String result = SchemaRefreshJob.getCachedSchema();
         Test.stopTest();
@@ -82,12 +82,12 @@ private class SchemaRefreshJobTest {
         System.assertNotEquals(null, result, 'Should return schema');
         System.assert(result.length() > 100, 'Should have substantial content');
 
-        // Verify it was stored
+        // Should NOT have created a cache record (no DML to avoid callout conflict)
         List<AI_Schema_Cache__c> stored = [
             SELECT Id FROM AI_Schema_Cache__c
             WHERE Name = 'SCHEMA_SUMMARY'
         ];
-        System.assertEquals(1, stored.size(), 'Should have created cache record');
+        System.assertEquals(0, stored.size(), 'Should not create cache during live compute');
     }
 
     @isTest

@@ -414,6 +414,7 @@ public with sharing class DynamicQueryBuilder {
         }
 
         // GROUP BY
+        Boolean hasGroupBy = false;
         if (agg.groupByFields != null && !agg.groupByFields.isEmpty()) {
             List<String> validGroupBy = new List<String>();
             for (String gf : agg.groupByFields) {
@@ -424,11 +425,15 @@ public with sharing class DynamicQueryBuilder {
             }
             if (!validGroupBy.isEmpty()) {
                 soql += ' GROUP BY ' + String.join(validGroupBy, ', ');
+                hasGroupBy = true;
             }
         }
 
-        Integer rowLimit = Math.min(spec.limitRows != null ? spec.limitRows : DEFAULT_ROW_LIMIT, MAX_ROW_LIMIT);
-        soql += ' LIMIT ' + rowLimit;
+        // LIMIT — only allowed with GROUP BY for aggregate queries
+        if (hasGroupBy) {
+            Integer rowLimit = Math.min(spec.limitRows != null ? spec.limitRows : DEFAULT_ROW_LIMIT, MAX_ROW_LIMIT);
+            soql += ' LIMIT ' + rowLimit;
+        }
 
         return soql;
     }

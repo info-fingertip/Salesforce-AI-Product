@@ -78,8 +78,9 @@ public with sharing class SchemaRefreshJob implements Schedulable {
     // ── Read cached schema (called by orchestrator) ─────────────────────────
 
     /**
-     * Returns the cached schema summary. If no cache exists, builds it
-     * on-the-fly (first request only) and stores it for future use.
+     * Returns the cached schema summary. If no cache exists, computes it
+     * live WITHOUT DML (to avoid "uncommitted work" errors before callouts).
+     * The cache will be populated on the next scheduled run or manual refresh.
      *
      * @return Pre-computed schema summary string
      */
@@ -95,22 +96,8 @@ public with sharing class SchemaRefreshJob implements Schedulable {
             return cached[0].Schema_Summary__c;
         }
 
-        // First time — build and cache
-        refreshNow();
-
-        // Re-read
-        cached = [
-            SELECT Schema_Summary__c
-            FROM AI_Schema_Cache__c
-            WHERE Name = :CACHE_KEY
-            LIMIT 1
-        ];
-
-        if (!cached.isEmpty()) {
-            return cached[0].Schema_Summary__c;
-        }
-
-        // Fallback: compute live (should never reach here)
+        // No cache exists — compute live (no DML to avoid callout conflict)
+        // Cache will be populated by scheduled job or manual SchemaRefreshJob.refreshNow()
         return SchemaService.getCompactSchemaSummary();
     }
 }
