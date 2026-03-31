@@ -24,9 +24,11 @@
  */
 public with sharing class AIToolUseAgent {
 
-    private static final Integer MAX_TOOL_ROUNDS  = 5;
-    private static final Integer MAX_SOQL_ROWS    = 200;
-    private static final Integer MAX_RESULT_CHARS = 20000;
+    private static final Integer MAX_TOOL_ROUNDS    = 5;
+    private static final Integer MAX_SOQL_ROWS     = 100;
+    private static final Integer MAX_RESULT_CHARS  = 15000;
+    private static final Integer MAX_QUERIES_TOTAL = 6; // max SOQL queries AI can run per request
+    private static Integer queryCount = 0; // tracks SOQL usage per transaction
 
     // ── Response wrapper ────────────────────────────────────────────────────
 
@@ -141,12 +143,16 @@ public with sharing class AIToolUseAgent {
             '3. Call query_salesforce to fetch actual data\n' +
             '4. Analyze the results and provide a clear, insightful answer\n\n' +
             'RULES:\n' +
-            '- Always verify field names exist before using them in SOQL\n' +
-            '- Use LIMIT in queries (default 50, max 200)\n' +
-            '- Use parent relationship dot notation for related data (e.g. Account.Name)\n' +
+            '- Always verify field names exist before using them in SOQL (call describe_object first)\n' +
+            '- Use LIMIT in queries (default 50, max 100)\n' +
+            '- You can run a maximum of 6 queries per request — be efficient\n' +
+            '- Use parent relationship dot notation for related data (e.g. Account.Name on Opportunity)\n' +
             '- Use child subqueries when needed (e.g. SELECT Id, (SELECT Id FROM Contacts) FROM Account)\n' +
-            '- For date filters use: TODAY, LAST_N_DAYS:30, THIS_MONTH, THIS_QUARTER, etc.\n' +
-            '- If a query fails, read the error and fix the SOQL\n\n' +
+            '- For date filters use Salesforce literals: TODAY, LAST_N_DAYS:30, THIS_MONTH, THIS_QUARTER, NEXT_N_MONTHS:3, THIS_YEAR\n' +
+            '- Do NOT use LIMIT on aggregate queries without GROUP BY (Salesforce blocks this)\n' +
+            '- If a query fails, read the error message carefully, fix the SOQL, and retry ONCE\n' +
+            '- If you get a field not found error, call describe_object to check the correct API names\n' +
+            '- Do NOT query more data than needed — be precise with fields and filters\n\n' +
             'RESPONSE STYLE:\n' +
             '- Use ## headings, markdown tables, bullet points, blockquotes\n' +
             '- Use **bold** for emphasis and `code` for field/object names\n' +
@@ -196,11 +202,15 @@ public with sharing class AIToolUseAgent {
             Set<String> queriedObjects = new Set<String>();
             Integer totalRecords = 0;
             List<String> debugSoqls = new List<String>();
+            queryCount = 0; // reset per request
 
             for (Integer round = 0; round < MAX_TOOL_ROUNDS; round++) {
-                // Check governor limits
+                // Check governor limits before each AI call
                 if (Limits.getCallouts() >= Limits.getLimitCallouts() - 1) {
                     throw new AgentException('Callout limit reached. Please try a simpler question.');
+                }
+                if (Limits.getCpuTime() > Limits.getLimitCpuTime() * 0.85) {
+                    throw new AgentException('CPU time limit approaching. Please try a simpler question.');
                 }
 
                 // Call AI
@@ -300,53 +310,99 @@ public with sharing class AIToolUseAgent {
     private static String executeQuery(String soql, Set<String> queriedObjects, List<String> debugSoqls) {
         if (String.isBlank(soql)) return '{"error": "SOQL query is required"}';
 
-        // Safety: block DML keywords
+        // ── Guard: max queries per request ──
+        if (queryCount >= MAX_QUERIES_TOTAL) {
+            return '{"error": "Query limit reached (' + MAX_QUERIES_TOTAL + ' queries per request). Please provide your answer with the data you already have."}';
+        }
+
+        // ── Guard: Salesforce SOQL governor limit ──
+        if (Limits.getQueries() >= Limits.getLimitQueries() - 3) {
+            return '{"error": "Approaching Salesforce SOQL governor limit. Please answer with the data you already have."}';
+        }
+
         String upper = soql.toUpperCase().trim();
-        for (String keyword : new List<String>{ 'INSERT', 'UPDATE', 'DELETE', 'UPSERT', 'MERGE' }) {
-            if (upper.startsWith(keyword)) {
-                return '{"error": "Only SELECT queries are allowed"}';
+
+        // ── Safety: must start with SELECT ──
+        if (!upper.startsWith('SELECT')) {
+            return '{"error": "Only SELECT queries are allowed. Your query starts with an invalid keyword."}';
+        }
+
+        // ── Safety: block dangerous keywords anywhere in query ──
+        for (String keyword : new List<String>{ 'INSERT ', 'UPDATE ', 'DELETE ', 'UPSERT ', 'MERGE ', 'DROP ', 'ALTER ', 'GRANT ' }) {
+            if (upper.contains(keyword)) {
+                return '{"error": "Blocked keyword detected: ' + keyword.trim() + '. Only read queries are allowed."}';
             }
         }
         if (soql.contains(';')) {
-            return '{"error": "Semicolons not allowed in queries"}';
+            return '{"error": "Semicolons not allowed. Send one query at a time."}';
         }
 
-        // Force LIMIT if missing
-        if (!upper.contains(' LIMIT ')) {
-            soql += ' LIMIT 50';
-        }
+        // ── Fix: non-grouped aggregate queries cannot use LIMIT ──
+        Boolean isAggregate = upper.contains('COUNT(') || upper.contains('SUM(') ||
+                              upper.contains('AVG(')   || upper.contains('MAX(') ||
+                              upper.contains('MIN(');
+        Boolean hasGroupBy = upper.contains(' GROUP BY ');
 
-        // Cap LIMIT
-        Integer limitIdx = upper.lastIndexOf(' LIMIT ');
-        if (limitIdx > 0) {
-            String limitPart = soql.substring(limitIdx + 7).trim();
-            try {
-                Integer limitVal = Integer.valueOf(limitPart);
-                if (limitVal > MAX_SOQL_ROWS) {
-                    soql = soql.substring(0, limitIdx) + ' LIMIT ' + MAX_SOQL_ROWS;
-                }
-            } catch (Exception e) { /* keep as is */ }
+        if (isAggregate && !hasGroupBy) {
+            // Strip LIMIT from non-grouped aggregate queries
+            Integer limitIdx = upper.lastIndexOf(' LIMIT ');
+            if (limitIdx > 0) {
+                soql = soql.substring(0, limitIdx);
+                upper = soql.toUpperCase().trim();
+            }
+        } else {
+            // For non-aggregate queries: force LIMIT if missing
+            if (!upper.contains(' LIMIT ')) {
+                soql += ' LIMIT 50';
+                upper = soql.toUpperCase().trim();
+            }
+
+            // Cap LIMIT to MAX_SOQL_ROWS
+            Integer limitIdx = upper.lastIndexOf(' LIMIT ');
+            if (limitIdx > 0) {
+                String afterLimit = soql.substring(limitIdx + 7).trim();
+                // Handle "LIMIT 50 OFFSET 10" — only take the number
+                String limitNum = afterLimit.split('\\s')[0].trim();
+                try {
+                    Integer limitVal = Integer.valueOf(limitNum);
+                    if (limitVal > MAX_SOQL_ROWS) {
+                        soql = soql.substring(0, limitIdx) + ' LIMIT ' + MAX_SOQL_ROWS;
+                    }
+                } catch (Exception e) { /* keep as is */ }
+            }
         }
 
         debugSoqls.add(soql);
+        queryCount++;
 
         // Extract object name for tracking
-        String fromObj = extractObjectName(upper);
+        String fromObj = extractObjectName(soql.toUpperCase().trim());
         if (String.isNotBlank(fromObj)) queriedObjects.add(fromObj);
 
-        // Execute
+        // ── Execute with error handling ──
         try {
             List<SObject> records = Database.query(soql);
             String result = JSON.serializePretty(records);
 
             // Truncate if too large
             if (result.length() > MAX_RESULT_CHARS) {
-                result = result.substring(0, MAX_RESULT_CHARS) + '\n... (truncated, ' + records.size() + ' total records)';
+                result = result.substring(0, MAX_RESULT_CHARS) +
+                    '\n... (truncated to fit, showing partial data of ' + records.size() + ' total records)';
             }
 
             return '{"totalSize": ' + records.size() + ', "records": ' + result + '}';
+
+        } catch (System.QueryException e) {
+            // SOQL syntax or field errors — give AI enough info to self-correct
+            return '{"error": "SOQL Error: ' + String.escapeSingleQuotes(e.getMessage()) +
+                '", "failedSoql": "' + String.escapeSingleQuotes(soql) +
+                '", "hint": "Check field names against describe_object. Common fixes: use API names not labels, check relationship names, verify date formats."}';
+        } catch (System.LimitException e) {
+            return '{"error": "Salesforce governor limit hit: ' + String.escapeSingleQuotes(e.getMessage()) +
+                '", "hint": "Use a smaller LIMIT or simplify the query."}';
         } catch (Exception e) {
-            return '{"error": "SOQL Error: ' + String.escapeSingleQuotes(e.getMessage()) + '", "soql": "' + String.escapeSingleQuotes(soql) + '"}';
+            return '{"error": "Query failed: ' + String.escapeSingleQuotes(e.getMessage()) +
+                '", "failedSoql": "' + String.escapeSingleQuotes(soql) + '"}';
         }
     }
 
