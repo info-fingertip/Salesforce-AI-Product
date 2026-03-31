@@ -1,6 +1,6 @@
 import { LightningElement } from 'lwc';
 import { ShowToastEvent } from 'lightning/platformShowToastEvent';
-import handleQuestion from '@salesforce/apex/AIAgentOrchestrator.handleQuestion';
+import handleQuestion from '@salesforce/apex/AIToolUseAgent.handleQuestion';
 import { markdownToHtml, extractChartData } from './markdownParser';
 import { sanitizeHtml } from './htmlSanitizer';
 
